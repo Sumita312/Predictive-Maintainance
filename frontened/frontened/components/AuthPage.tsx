@@ -24,7 +24,7 @@ export default function AuthPage({ onLogin }: { onLogin: (u: User) => void }) {
 
   const f = (k: string, v: string) => setForm(p => ({ ...p, [k]: v }))
 
-  function handleRegister() {
+  async function handleRegister() {
     const e: Record<string, string> = {}
     if (!form.name.trim()) e.name = 'Full name required'
     if (!form.empId.trim()) e.empId = 'Employee ID required'
@@ -36,29 +36,38 @@ export default function AuthPage({ onLogin }: { onLogin: (u: User) => void }) {
     setErrors(e)
     if (Object.keys(e).length) return
     setLoading(true)
-    const users = JSON.parse(localStorage.getItem('iocl_users') || '[]')
-    if (users.find((u: any) => u.email === form.email)) {
-      setErrors({ email: 'Already registered' }); setLoading(false); return
-    }
-    users.push({ name: form.name, empId: form.empId, dept: form.dept, email: form.email, password: form.password })
-    localStorage.setItem('iocl_users', JSON.stringify(users))
-    setMsg('✅ Account created! Please login.')
-    setMode('login')
-    setForm({ name: '', empId: '', dept: '', email: '', password: '', confirm: '' })
+    try {
+      const res = await fetch('http://127.0.0.1:5050/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form)
+      })
+      const data = await res.json()
+      if (!data.success) { setErrors({ email: data.error }); setLoading(false); return }
+      setMsg('✅ Account created! Please login.')
+      setMode('login')
+      setForm({ name: '', empId: '', dept: '', email: '', password: '', confirm: '' })
+    } catch { setErrors({ email: 'Could not connect to server. Is Flask running?' }) }
     setLoading(false)
   }
 
-  function handleLogin() {
+  async function handleLogin() {
     const e: Record<string, string> = {}
     if (!IOCL_EMAIL.test(form.email)) e.email = 'Must be @iocl.co.in email'
     if (!form.password) e.password = 'Password required'
     setErrors(e)
     if (Object.keys(e).length) return
     setLoading(true)
-    const users = JSON.parse(localStorage.getItem('iocl_users') || '[]')
-    const found = users.find((u: any) => u.email === form.email && u.password === form.password)
-    if (!found) { setErrors({ password: 'Invalid email or password' }); setLoading(false); return }
-    onLogin({ name: found.name, email: found.email, dept: found.dept, empId: found.empId })
+    try {
+      const res = await fetch('http://127.0.0.1:5050/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: form.email, password: form.password })
+      })
+      const data = await res.json()
+      if (!data.success) { setErrors({ password: data.error }); setLoading(false); return }
+      onLogin({ name: data.name, email: data.email, dept: data.dept, empId: data.empId })
+    } catch { setErrors({ password: 'Could not connect to server. Is Flask running?' }) }
     setLoading(false)
   }
 
@@ -104,7 +113,7 @@ export default function AuthPage({ onLogin }: { onLogin: (u: User) => void }) {
 
           <div style={{ display: 'flex', background: 'rgba(255,255,255,0.04)', borderRadius: 10, padding: 4, marginBottom: 22 }}>
             {(['login', 'register'] as const).map(m => (
-              <button key={m} className={`auth-tab${mode === m ? ' active' : ''}`} onClick={() => { setMode(m); setErrors({}); setMsg('') }}>
+             <button key={m} className={`auth-tab${mode === m ? ' active' : ''}`} onClick={() => { setMode(m); setErrors({}); setMsg(''); setForm({ name: '', empId: '', dept: '', email: '', password: '', confirm: '' }) }}>
                 {m === 'login' ? '🔐 LOGIN' : '📝 REGISTER'}
               </button>
             ))}
@@ -118,14 +127,12 @@ export default function AuthPage({ onLogin }: { onLogin: (u: User) => void }) {
             <>
               <div style={{ marginBottom: 14 }}>
                 <label className="auth-label">FULL NAME</label>
-                <input className="auth-input" placeholder="e.g. Rajesh Kumar Sharma" value={form.name} onChange={e => f('name', e.target.value)} />
-                {errors.name && <div className="auth-err">⚠ {errors.name}</div>}
+                <input className="auth-input" placeholder="e.g. Rajesh Kumar Sharma" value={form.name} onChange={e => f('name', e.target.value)} autoComplete="off" />                {errors.name && <div className="auth-err">⚠ {errors.name}</div>}
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
                 <div>
                   <label className="auth-label">EMPLOYEE ID</label>
-                  <input className="auth-input" placeholder="IOCL-2024-XXXX" value={form.empId} onChange={e => f('empId', e.target.value)} />
-                  {errors.empId && <div className="auth-err">⚠ {errors.empId}</div>}
+                  <input className="auth-input" placeholder="IOCL-2024-XXXX" value={form.empId} onChange={e => f('empId', e.target.value)} autoComplete="off" />                  {errors.empId && <div className="auth-err">⚠ {errors.empId}</div>}
                 </div>
                 <div>
                   <label className="auth-label">DEPARTMENT</label>
@@ -141,7 +148,7 @@ export default function AuthPage({ onLogin }: { onLogin: (u: User) => void }) {
 
           <div style={{ marginBottom: 14 }}>
             <label className="auth-label">IOCL EMAIL</label>
-            <input className="auth-input" type="email" placeholder="yourname@iocl.co.in" value={form.email} onChange={e => f('email', e.target.value)} />
+            <input className="auth-input" type="email" placeholder="yourname@iocl.co.in" value={form.email} onChange={e => f('email', e.target.value)} autoComplete="off" />
             {errors.email && <div className="auth-err">⚠ {errors.email}</div>}
           </div>
 
@@ -150,7 +157,7 @@ export default function AuthPage({ onLogin }: { onLogin: (u: User) => void }) {
               <label className="auth-label" style={{ marginBottom: 0 }}>PASSWORD</label>
               <span style={{ cursor: 'pointer', color: '#2a3450', fontSize: 11, fontFamily: "'Rajdhani', sans-serif", fontWeight: 600 }} onClick={() => setShowPwd(p => !p)}>{showPwd ? '🙈 HIDE' : '👁 SHOW'}</span>
             </div>
-            <input className="auth-input" type={showPwd ? 'text' : 'password'} placeholder="Enter password" value={form.password} onChange={e => f('password', e.target.value)} />
+            <input className="auth-input" type={showPwd ? 'text' : 'password'} placeholder="Enter password" value={form.password} onChange={e => f('password', e.target.value)} autoComplete="new-password" />
             {errors.password && <div className="auth-err">⚠ {errors.password}</div>}
           </div>
 
@@ -158,10 +165,8 @@ export default function AuthPage({ onLogin }: { onLogin: (u: User) => void }) {
             <>
               <div style={{ marginBottom: 14 }}>
                 <label className="auth-label">CONFIRM PASSWORD</label>
-                <input className="auth-input" type={showPwd ? 'text' : 'password'} placeholder="Re-enter password" value={form.confirm} onChange={e => f('confirm', e.target.value)} />
-                {errors.confirm && <div className="auth-err">⚠ {errors.confirm}</div>}
-              </div>
-              <div style={{ background: 'rgba(0,48,135,0.08)', border: '1px solid rgba(0,48,135,0.2)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 11, color: '#5b8af0', fontFamily: "'Rajdhani', sans-serif", fontWeight: 600, letterSpacing: 0.5 }}>
+                <input className="auth-input" type={showPwd ? 'text' : 'password'} placeholder="Re-enter password" value={form.confirm} onChange={e => { f('confirm', e.target.value); if (form.password === e.target.value) setErrors(prev => ({ ...prev, confirm: '' })) }} autoComplete="new-password" />                {errors.confirm && <div className="auth-err">⚠ {errors.confirm}</div>}
+              </div>              <div style={{ background: 'rgba(0,48,135,0.08)', border: '1px solid rgba(0,48,135,0.2)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 11, color: '#5b8af0', fontFamily: "'Rajdhani', sans-serif", fontWeight: 600, letterSpacing: 0.5 }}>
                 🔐 8+ chars · 1 uppercase · 1 number · 1 special character
               </div>
             </>

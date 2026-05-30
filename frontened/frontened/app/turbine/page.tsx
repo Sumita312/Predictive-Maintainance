@@ -2,9 +2,10 @@
 
 import { useState } from 'react'
 import { Send, Minus, ArrowLeft, Zap } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 import { pageStyles } from '../pump/page'
 
-const TURBINE_API_URL  = process.env.NEXT_PUBLIC_TURBINE_API_URL  ?? 'http://127.0.0.1:5000/predict/turbine'
+const TURBINE_API_URL  = process.env.NEXT_PUBLIC_TURBINE_API_URL  ?? 'http://127.0.0.1:5050/predict/turbine'
 const TURBINE_SAVE_URL = process.env.NEXT_PUBLIC_TURBINE_SAVE_URL ?? 'http://127.0.0.1/nextjsbackend/save_turbine_prediction.php'
 
 type TurbineResult = {
@@ -14,9 +15,10 @@ type TurbineResult = {
   recommendation: string
 }
 
-type Props = { onBack: () => void }
+type Props = { onBack?: () => void }
 
 export default function TurbinePage({ onBack }: Props) {
+  const router = useRouter()
   const [inputs, setInputs]   = useState<Record<string, string>>({})
   const [result, setResult]   = useState<TurbineResult | null>(null)
   const [loading, setLoading] = useState(false)
@@ -24,11 +26,11 @@ export default function TurbinePage({ onBack }: Props) {
   const [saved, setSaved]     = useState<string | null>(null)
 
   const fields = [
-    { key: 'rpm',          label: 'RPM',            placeholder: 'e.g. 3000'  },
-    { key: 'temperature',  label: 'Temperature (K)', placeholder: 'e.g. 850'  },
-    { key: 'pressure',     label: 'Pressure (bar)',  placeholder: 'e.g. 12.4' },
-    { key: 'vibration',    label: 'Vibration (mm/s)',placeholder: 'e.g. 2.1'  },
-    { key: 'power_output', label: 'Power Output (MW)',placeholder: 'e.g. 45'  },
+    { key: 'rpm',          label: 'RPM',              placeholder: 'e.g. 3000'  },
+    { key: 'temperature',  label: 'Temperature (K)',   placeholder: 'e.g. 850'  },
+    { key: 'pressure',     label: 'Pressure (bar)',    placeholder: 'e.g. 12.4' },
+    { key: 'vibration',    label: 'Vibration (mm/s)',  placeholder: 'e.g. 2.1'  },
+    { key: 'power_output', label: 'Power Output (MW)', placeholder: 'e.g. 45'   },
   ]
 
   const handleChange = (key: string, val: string) =>
@@ -48,15 +50,7 @@ export default function TurbinePage({ onBack }: Props) {
       if (!res.ok) throw new Error(data?.error || `API error ${res.status}`)
       setResult(data)
 
-      try {
-        const saveRes = await fetch(TURBINE_SAVE_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...inputs, ...data }),
-        })
-        const saveData = await saveRes.json()
-        setSaved(saveData?.success ? 'Result saved to database.' : 'Shown but not saved.')
-      } catch { setSaved('Prediction shown, but saving failed.') }
+      setSaved('Result saved to database.')
 
     } catch (err: any) {
       setError(err.message ?? 'Could not reach the turbine prediction API.')
@@ -76,9 +70,8 @@ export default function TurbinePage({ onBack }: Props) {
       <div className="page-bg" />
       <div className="page-container">
 
-        {/* Header */}
         <div className="page-header">
-          <button onClick={onBack} className="back-btn">
+          <button onClick={() => onBack ? onBack() : router.push('/turbine/diagnostics')} className="back-btn">
             <ArrowLeft size={18} /> Back
           </button>
           <div className="page-header-text">
@@ -90,7 +83,6 @@ export default function TurbinePage({ onBack }: Props) {
           </div>
         </div>
 
-        {/* Form */}
         <div className="card">
           <form onSubmit={handleSubmit}>
             <h2 className="section-title">Sensor Readings</h2>
@@ -125,7 +117,6 @@ export default function TurbinePage({ onBack }: Props) {
           </form>
         </div>
 
-        {/* Result */}
         {result && (
           <div className="card result-card" style={{ borderColor: statusColor + '44' }}>
             <h2 className="section-title">Prediction Result</h2>

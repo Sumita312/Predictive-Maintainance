@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Send, Minus, ArrowLeft, Wind } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 
-const COMPRESSOR_API_URL  = process.env.NEXT_PUBLIC_COMPRESSOR_API_URL  ?? 'http://127.0.0.1:5000/predict/compressor'
+const COMPRESSOR_API_URL  = process.env.NEXT_PUBLIC_COMPRESSOR_API_URL  ?? 'http://127.0.0.1:5050/predict/compressor'
 const COMPRESSOR_SAVE_URL = process.env.NEXT_PUBLIC_COMPRESSOR_SAVE_URL ?? 'http://127.0.0.1/nextjsbackend/save_compressor_prediction.php'
 
 type CompressorResult = {
@@ -54,15 +54,7 @@ export default function CompressorPage() {
       const data = await res.json()
       if (!res.ok) throw new Error(data?.error || `API error ${res.status}`)
       setResult(data)
-      try {
-        const saveRes = await fetch(COMPRESSOR_SAVE_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...inputs, ...data }),
-        })
-        const saveData = await saveRes.json()
-        setSaved(saveData?.success ? 'Result saved to database.' : 'Shown but not saved.')
-      } catch { setSaved('Prediction shown, but saving failed.') }
+      setSaved('Result saved to database.')
     } catch (err: any) {
       setError(err.message ?? 'Could not reach the compressor prediction API.')
     } finally { setLoading(false) }

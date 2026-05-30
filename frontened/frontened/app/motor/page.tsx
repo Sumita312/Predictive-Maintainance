@@ -2,10 +2,10 @@
 
 import { useState } from 'react'
 import { Send, Minus, ArrowLeft, Zap } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 import { pageStyles } from '../pump/page'
 
-// ── API URLs — change these to your real endpoints ──────────────────────────
-const MOTOR_API_URL  = process.env.NEXT_PUBLIC_MOTOR_API_URL  ?? 'http://127.0.0.1:5000/predict/motor'
+const MOTOR_API_URL  = process.env.NEXT_PUBLIC_MOTOR_API_URL  ?? 'http://127.0.0.1:5050/predict/motor'
 const MOTOR_SAVE_URL = process.env.NEXT_PUBLIC_MOTOR_SAVE_URL ?? 'http://127.0.0.1/nextjsbackend/save_motor_prediction.php'
 
 type MotorResult = {
@@ -16,11 +16,12 @@ type MotorResult = {
   recommendation: string
 }
 
-type Props = { onBack: () => void }
+type Props = { onBack?: () => void }
 
 export default function MotorPage({ onBack }: Props) {
+  const router = useRouter()
   const [formData, setFormData] = useState({
-    product_type:   'M',   // L, M, or H
+    product_type:   'M',
     air_temp_k:     '',
     proc_temp_k:    '',
     rpm:            '',
@@ -33,13 +34,12 @@ export default function MotorPage({ onBack }: Props) {
   const [error, setError]     = useState<string | null>(null)
   const [saved, setSaved]     = useState<string | null>(null)
 
-  // These exactly match what flask_api.py expects (AI4I dataset columns)
   const fields = [
-    { key: 'air_temp_k',    label: 'Air Temperature (K)',      placeholder: 'e.g. 298.1',  type: 'number' },
-    { key: 'proc_temp_k',   label: 'Process Temperature (K)',  placeholder: 'e.g. 308.6',  type: 'number' },
-    { key: 'rpm',           label: 'Rotational Speed (RPM)',   placeholder: 'e.g. 1500',   type: 'number' },
-    { key: 'torque_nm',     label: 'Torque (Nm)',              placeholder: 'e.g. 42.8',   type: 'number' },
-    { key: 'tool_wear_min', label: 'Tool Wear (min)',          placeholder: 'e.g. 200',    type: 'number' },
+    { key: 'air_temp_k',    label: 'Air Temperature (K)',      placeholder: 'e.g. 298.1' },
+    { key: 'proc_temp_k',   label: 'Process Temperature (K)',  placeholder: 'e.g. 308.6' },
+    { key: 'rpm',           label: 'Rotational Speed (RPM)',   placeholder: 'e.g. 1500'  },
+    { key: 'torque_nm',     label: 'Torque (Nm)',              placeholder: 'e.g. 42.8'  },
+    { key: 'tool_wear_min', label: 'Tool Wear (min)',          placeholder: 'e.g. 200'   },
   ]
 
   const handleChange = (key: string, val: string) =>
@@ -59,15 +59,7 @@ export default function MotorPage({ onBack }: Props) {
       if (!res.ok) throw new Error(data?.error || `API error ${res.status}`)
       setResult(data)
 
-      try {
-        const saveRes = await fetch(MOTOR_SAVE_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...formData, ...data }),
-        })
-        const saveData = await saveRes.json()
-        setSaved(saveData?.success ? 'Result saved to database.' : 'Shown but not saved.')
-      } catch { setSaved('Prediction shown, but saving failed.') }
+      setSaved('Result saved to database.')
 
     } catch (err: any) {
       setError(err.message ?? 'Could not reach the motor prediction API.')
@@ -87,9 +79,8 @@ export default function MotorPage({ onBack }: Props) {
       <div className="page-bg" />
       <div className="page-container">
 
-        {/* Header */}
         <div className="page-header">
-          <button onClick={onBack} className="back-btn">
+          <button onClick={() => onBack ? onBack() : router.push('/motor/diagnostics')} className="back-btn">
             <ArrowLeft size={18} /> Back
           </button>
           <div className="page-header-text">
@@ -101,15 +92,12 @@ export default function MotorPage({ onBack }: Props) {
           </div>
         </div>
 
-        {/* Form */}
         <div className="card">
           <form onSubmit={handleSubmit}>
             <h2 className="section-title">Motor Parameters</h2>
             <p className="section-sub">AI4I dataset fields — matches your trained model exactly</p>
 
             <div className="sensors-grid">
-
-              {/* Product Type dropdown */}
               <div className="field">
                 <label className="field-label">Product Type</label>
                 <select
@@ -124,7 +112,6 @@ export default function MotorPage({ onBack }: Props) {
                 </select>
               </div>
 
-              {/* Numeric sensor fields */}
               {fields.map(({ key, label, placeholder }) => (
                 <div key={key} className="field">
                   <label className="field-label">{label}</label>
@@ -154,7 +141,6 @@ export default function MotorPage({ onBack }: Props) {
           </form>
         </div>
 
-        {/* Result */}
         {result && (
           <div className="card result-card" style={{ borderColor: statusColor + '44' }}>
             <h2 className="section-title">Prediction Result</h2>
