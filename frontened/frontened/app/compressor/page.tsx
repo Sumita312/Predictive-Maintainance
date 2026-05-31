@@ -49,7 +49,7 @@ export default function CompressorPage() {
       const res = await fetch(COMPRESSOR_API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(inputs),
+        body: JSON.stringify({ ...inputs, user_email: localStorage.getItem('user_email') ?? '' }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data?.error || `API error ${res.status}`)

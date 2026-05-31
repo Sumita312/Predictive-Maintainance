@@ -48,7 +48,7 @@ export default function PumpPage() {
       const res = await fetch(PUMP_API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(sensors),
+        body: JSON.stringify({ ...sensors, user_email: localStorage.getItem('user_email') ?? '' }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data?.error || `API error ${res.status}`)

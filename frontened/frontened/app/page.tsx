@@ -277,6 +277,6 @@ export default function RootPage() {
   }, [])
 
   if (!checked) return null
-  if (!user) return <AuthPage onLogin={(u) => { sessionStorage.setItem('iocl_session', JSON.stringify(u)); setUser(u) }} />
-  return <OriginalHomePage />
+if (!user) return <AuthPage onLogin={(u) => { sessionStorage.setItem('iocl_session', JSON.stringify(u)); localStorage.setItem('user_email', u.email); setUser(u) }} /> 
+return <OriginalHomePage />
 }

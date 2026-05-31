@@ -1,18 +1,29 @@
-
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
 
-const ALERTS = [
-  { id: 'PH', name: 'Pump Unit H',   type: '💧 Pump',  block: 'Block 3', health: 22, status: 'BROKEN',      days: 4,  critical: true  },
-  { id: 'MF', name: 'Motor Unit 6',  type: '⚡ Motor', block: 'Block 4', health: 28, status: 'HIGH RISK',   days: 9,  critical: true  },
-  { id: 'PC', name: 'Pump Unit C',   type: '💧 Pump',  block: 'Block 2', health: 31, status: 'BROKEN',      days: 6,  critical: true  },
-  { id: 'MB', name: 'Motor Unit 2',  type: '⚡ Motor', block: 'Block 2', health: 38, status: 'HIGH RISK',   days: 14, critical: true  },
-  { id: 'MJ', name: 'Motor Unit 10', type: '⚡ Motor', block: 'Block 3', health: 42, status: 'HIGH RISK',   days: 21, critical: true  },
-  { id: 'PB', name: 'Pump Unit B',   type: '💧 Pump',  block: 'Block 1', health: 45, status: 'RECOVERING',  days: 22, critical: false },
-  { id: 'PF', name: 'Pump Unit F',   type: '💧 Pump',  block: 'Block 4', health: 48, status: 'RECOVERING',  days: 25, critical: false },
-  { id: 'MC', name: 'Motor Unit 3',  type: '⚡ Motor', block: 'Block 3', health: 52, status: 'MEDIUM RISK', days: 28, critical: false },
+const DUMMY_ALERTS = [
+  { id: 'PH', name: 'Pump Unit H',   type: '💧 Pump',       block: 'Block 3', health: 22, status: 'BROKEN',      days: 4,  critical: true,  isReal: false },
+  { id: 'MF', name: 'Motor Unit 6',  type: '⚡ Motor',      block: 'Block 4', health: 28, status: 'HIGH RISK',   days: 9,  critical: true,  isReal: false },
+  { id: 'PC', name: 'Pump Unit C',   type: '💧 Pump',       block: 'Block 2', health: 31, status: 'BROKEN',      days: 6,  critical: true,  isReal: false },
+  { id: 'MB', name: 'Motor Unit 2',  type: '⚡ Motor',      block: 'Block 2', health: 38, status: 'HIGH RISK',   days: 14, critical: true,  isReal: false },
+  { id: 'MJ', name: 'Motor Unit 10', type: '⚡ Motor',      block: 'Block 3', health: 42, status: 'HIGH RISK',   days: 21, critical: true,  isReal: false },
+  { id: 'PB', name: 'Pump Unit B',   type: '💧 Pump',       block: 'Block 1', health: 45, status: 'RECOVERING',  days: 22, critical: false, isReal: false },
+  { id: 'PF', name: 'Pump Unit F',   type: '💧 Pump',       block: 'Block 4', health: 48, status: 'RECOVERING',  days: 25, critical: false, isReal: false },
+  { id: 'MC', name: 'Motor Unit 3',  type: '⚡ Motor',      block: 'Block 3', health: 52, status: 'MEDIUM RISK', days: 28, critical: false, isReal: false },
 ]
+
+const MACHINE_ICON: Record<string, string> = {
+  MOTOR: '⚡ Motor', PUMP: '💧 Pump', COMPRESSOR: '🌀 Compressor', TURBINE: '⚙️ Turbine',
+}
+
+function mapStatus(prediction: string, risk_level: string) {
+  if (['FAULT', 'FAULTY', 'BROKEN'].includes(prediction)) return 'BROKEN'
+  if (prediction === 'DEGRADED') return 'MEDIUM RISK'
+  if (prediction === 'RECOVERING') return 'RECOVERING'
+  if (risk_level === 'High') return 'HIGH RISK'
+  return 'MEDIUM RISK'
+}
 
 function HealthRing({ value, size = 52 }: { value: number; size?: number }) {
   const r = 18, cx = size / 2, cy = size / 2, circ = 2 * Math.PI * r
@@ -34,6 +45,9 @@ function StatusBadge({ s }: { s: string }) {
     'HIGH RISK':   ['rgba(244,121,32,0.12)',  '#F47920'],
     RECOVERING:    ['rgba(245,158,11,0.12)',  '#f59e0b'],
     'MEDIUM RISK': ['rgba(245,158,11,0.1)',   '#f59e0b'],
+    FAULT:         ['rgba(239,68,68,0.12)',   '#ef4444'],
+    FAULTY:        ['rgba(239,68,68,0.12)',   '#ef4444'],
+    DEGRADED:      ['rgba(245,158,11,0.12)',  '#f59e0b'],
   }
   const [bg, cl] = map[s] || ['rgba(91,138,240,0.12)', '#5b8af0']
   return (
@@ -45,12 +59,51 @@ function StatusBadge({ s }: { s: string }) {
 }
 
 export default function AlertsPage() {
+  const [allAlerts, setAllAlerts] = useState(DUMMY_ALERTS as any[])
   const [muted, setMuted] = useState(false)
   const [acked, setAcked] = useState<string[]>([])
   const [notes, setNotes] = useState<Record<string, string>>({})
   const [noteInput, setNoteInput] = useState<Record<string, string>>({})
   const audioCtx = useRef<AudioContext | null>(null)
-  const criticalUnacked = ALERTS.filter(a => a.critical && !acked.includes(a.id)).length
+
+  useEffect(() => {
+    async function fetchReal() {
+      try {
+        const [motor, pump, compressor, turbine] = await Promise.all([
+          fetch('http://127.0.0.1:5050/motor-history').then(r => r.json()),
+          fetch('http://127.0.0.1:5050/pump-history').then(r => r.json()),
+          fetch('http://127.0.0.1:5050/compressor-history').then(r => r.json()),
+          fetch('http://127.0.0.1:5050/turbine-history').then(r => r.json()),
+        ])
+        const all = [
+          ...motor.map((r: any) => ({ ...r, machine: 'MOTOR' })),
+          ...pump.map((r: any) => ({ ...r, machine: 'PUMP' })),
+          ...compressor.map((r: any) => ({ ...r, machine: 'COMPRESSOR' })),
+          ...turbine.map((r: any) => ({ ...r, machine: 'TURBINE' })),
+        ]
+        const realAlerts = all
+          .filter(r => ['FAULT', 'FAULTY', 'BROKEN', 'DEGRADED', 'RECOVERING'].includes(r.prediction))
+          .map(r => ({
+            id: `real-${r.machine}-${r.id}`,
+            name: `${MACHINE_ICON[r.machine] || r.machine} — Live`,
+            type: MACHINE_ICON[r.machine] || r.machine,
+            block: 'Live Data',
+            health: Math.round(100 - r.confidence),
+            status: mapStatus(r.prediction, r.risk_level),
+            days: r.risk_level === 'High' ? 3 : r.risk_level === 'Medium' ? 14 : 30,
+            critical: r.risk_level === 'High',
+            isReal: true,
+            time: new Date(r.created_at).toLocaleString(),
+          }))
+        setAllAlerts([...realAlerts, ...DUMMY_ALERTS])
+      } catch {
+        setAllAlerts(DUMMY_ALERTS)
+      }
+    }
+    fetchReal()
+  }, [])
+
+  const criticalUnacked = allAlerts.filter(a => a.critical && !acked.includes(a.id)).length
 
   function beep() {
     if (muted) return
@@ -112,10 +165,12 @@ export default function AlertsPage() {
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {ALERTS.map(a => {
+        {allAlerts.map(a => {
           const isAcked = acked.includes(a.id)
           const streakColor = a.critical ? '#ef4444' : '#f59e0b'
-          const borderColor = a.critical ? 'rgba(239,68,68,0.25)' : 'rgba(245,158,11,0.2)'
+          const borderColor = a.isReal
+            ? 'rgba(244,121,32,0.4)'
+            : a.critical ? 'rgba(239,68,68,0.25)' : 'rgba(245,158,11,0.2)'
           return (
             <div key={a.id} className="alert-card" style={{ border: `1px solid ${borderColor}`, opacity: isAcked ? 0.4 : 1 }}>
               <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg, ${streakColor}, ${streakColor}22)`, borderRadius: '16px 16px 0 0' }} />
@@ -123,10 +178,16 @@ export default function AlertsPage() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                   <HealthRing value={a.health} />
                   <div>
-                    <div style={{ fontWeight: 700, color: '#f0f4ff', fontSize: 15, fontFamily: "'Rajdhani', sans-serif", letterSpacing: 0.3 }}>{a.name}</div>
+                    <div style={{ fontWeight: 700, color: '#f0f4ff', fontSize: 15, fontFamily: "'Rajdhani', sans-serif", letterSpacing: 0.3 }}>
+                      {a.name}
+                      {a.isReal && <span style={{ marginLeft: 8, fontSize: 9, color: '#F47920', fontWeight: 700, letterSpacing: 1 }}>●LIVE</span>}
+                    </div>
                     <div style={{ fontFamily: "'Rajdhani', sans-serif", fontSize: 11, color: '#2a3450', marginTop: 3, fontWeight: 600, letterSpacing: 1 }}>{a.type} · {a.block}</div>
                     <div style={{ fontFamily: "'Rajdhani', sans-serif", fontSize: 11, color: '#2a3450', marginTop: 3, fontWeight: 600, letterSpacing: 1 }}>
-                      FORECAST: <span style={{ color: a.days <= 14 ? '#ef4444' : '#f59e0b', fontWeight: 700 }}>~{a.days} DAYS</span>
+                      {a.isReal
+                        ? <span style={{ color: '#5b8af0' }}>{a.time}</span>
+                        : <span>FORECAST: <span style={{ color: a.days <= 14 ? '#ef4444' : '#f59e0b', fontWeight: 700 }}>~{a.days} DAYS</span></span>
+                      }
                     </div>
                   </div>
                 </div>

@@ -53,8 +53,7 @@ export default function MotorPage({ onBack }: Props) {
       const res = await fetch(MOTOR_API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
-      })
+body: JSON.stringify({ ...formData, user_email: localStorage.getItem('user_email') ?? '' }),      })
       const data = await res.json()
       if (!res.ok) throw new Error(data?.error || `API error ${res.status}`)
       setResult(data)

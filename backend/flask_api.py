@@ -8,15 +8,11 @@ import numpy as np
 import pandas as pd
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from db import db, cursor
+from db import db, cursor, reconnect, get_connection
 import json
 
 app = Flask(__name__)
 CORS(app)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# LOAD MODELS AT STARTUP
-# ══════════════════════════════════════════════════════════════════════════════
 
 print("Loading motor model artefacts...")
 try:
@@ -61,13 +57,11 @@ try:
 except Exception as e:
     print(f"  ❌ Turbine model load failed: {e}")
 
-# ══════════════════════════════════════════════════════════════════════════════
-# AUTH ROUTES
-# ══════════════════════════════════════════════════════════════════════════════
-
 @app.route('/auth/register', methods=['POST'])
 def register():
     data = request.json
+    if not data.get('email', '').endswith('@iocl.co.in'):
+        return jsonify({'success': False, 'error': 'Only @iocl.co.in emails allowed'}), 400
     try:
         cursor.execute("SELECT id FROM users WHERE email = %s", (data['email'],))
         if cursor.fetchone():
@@ -84,6 +78,8 @@ def register():
 @app.route('/auth/login', methods=['POST'])
 def login():
     data = request.json
+    if not data.get('email', '').endswith('@iocl.co.in'):
+        return jsonify({'success': False, 'error': 'Only @iocl.co.in emails allowed'}), 401
     try:
         cursor.execute("SELECT * FROM users WHERE email = %s AND password = %s",
             (data['email'], data['password']))
@@ -96,10 +92,6 @@ def login():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
-# ══════════════════════════════════════════════════════════════════════════════
-# HEALTH CHECK
-# ══════════════════════════════════════════════════════════════════════════════
-
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({
@@ -109,10 +101,6 @@ def health():
         "compressor_model_loaded": compressor_model is not None,
         "turbine_model_loaded": turbine_model is not None,
     })
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MOTOR PREDICTION
-# ══════════════════════════════════════════════════════════════════════════════
 
 @app.route("/predict/motor", methods=["POST"])
 def predict_motor():
@@ -182,12 +170,12 @@ def predict_motor():
         cursor.execute("""
 INSERT INTO motor_predictions
 (product_type, air_temp_k, proc_temp_k, rpm, torque_nm, tool_wear_min,
-prediction, status, confidence, fault_type, risk_level, input_data)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+`prediction`, status, confidence, fault_type, risk_level, input_data, user_email)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 """, (
     data.get('product_type'), data.get('air_temp_k'), data.get('proc_temp_k'),
     data.get('rpm'), data.get('torque_nm'), data.get('tool_wear_min'),
-    status, status, confidence, fault_type, risk_level, json.dumps(data)
+    status, status, confidence, fault_type, risk_level, json.dumps(data), data.get('user_email')
 ))
         db.commit()
 
@@ -203,10 +191,6 @@ VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-# ══════════════════════════════════════════════════════════════════════════════
-# PUMP PREDICTION
-# ══════════════════════════════════════════════════════════════════════════════
 
 PUMP_SENSOR_DEFAULTS: dict = {}
 
@@ -254,14 +238,14 @@ def predict_pump():
 INSERT INTO pump_predictions
 (sensor_00, sensor_02, sensor_03, sensor_04, sensor_05, sensor_06,
 sensor_07, sensor_08, sensor_09, sensor_10, sensor_11, sensor_12,
-prediction, status, confidence, risk_level, input_data)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+`prediction`, status, confidence, risk_level, input_data, user_email)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 """, (
     data.get('sensor_00'), data.get('sensor_02'), data.get('sensor_03'),
     data.get('sensor_04'), data.get('sensor_05'), data.get('sensor_06'),
     data.get('sensor_07'), data.get('sensor_08'), data.get('sensor_09'),
     data.get('sensor_10'), data.get('sensor_11'), data.get('sensor_12'),
-    status, status, confidence, risk_level, json.dumps(data)
+    status, status, confidence, risk_level, json.dumps(data), data.get('user_email')
 ))
         db.commit()
 
@@ -275,10 +259,6 @@ VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-# ══════════════════════════════════════════════════════════════════════════════
-# COMPRESSOR PREDICTION
-# ══════════════════════════════════════════════════════════════════════════════
 
 @app.route("/predict/compressor", methods=["POST"])
 def predict_compressor():
@@ -328,15 +308,15 @@ def predict_compressor():
 INSERT INTO compressor_predictions
 (rpm, motor_power, torque, outlet_pressure_bar, air_flow, noise_db,
 outlet_temp, gaccx, gaccy, gaccz, haccx, haccy, haccz, bearings,
-prediction, status, confidence, risk_level, input_data)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+`prediction`, status, confidence, risk_level, input_data, user_email)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 """, (
     data.get('rpm'), data.get('motor_power'), data.get('torque'),
     data.get('outlet_pressure_bar'), data.get('air_flow'), data.get('noise_db'),
     data.get('outlet_temp'), data.get('gaccx'), data.get('gaccy'),
     data.get('gaccz'), data.get('haccx'), data.get('haccy'),
     data.get('haccz'), data.get('bearings'),
-    status, status, confidence, risk, json.dumps(data)
+    status, status, confidence, risk, json.dumps(data), data.get('user_email')
 ))
         db.commit()
 
@@ -350,10 +330,6 @@ VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TURBINE PREDICTION
-# ══════════════════════════════════════════════════════════════════════════════
 
 @app.route("/predict/turbine", methods=["POST"])
 def predict_turbine():
@@ -380,12 +356,12 @@ def predict_turbine():
         cursor.execute("""
 INSERT INTO turbine_predictions
 (rpm, temperature, pressure, vibration, power_output,
-prediction, status, confidence, risk_level, input_data)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+`prediction`, status, confidence, risk_level, input_data, user_email)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 """, (
     data.get('rpm'), data.get('temperature'), data.get('pressure'),
     data.get('vibration'), data.get('power_output'),
-    status, status, round(prob * 100, 2), risk, json.dumps(data)
+    status, status, round(prob * 100, 2), risk, json.dumps(data), data.get('user_email')
 ))
         db.commit()
 
@@ -404,37 +380,57 @@ VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ══════════════════════════════════════════════════════════════════════════════
-# HISTORY ROUTES
-# ══════════════════════════════════════════════════════════════════════════════
-
 @app.route("/motor-history")
 def motor_history():
-    cursor.execute("SELECT * FROM motor_predictions ORDER BY created_at DESC")
-    rows = cursor.fetchall()
-    return jsonify([{"id": r[0], "prediction": r[7], "confidence": r[9], "risk_level": r[11], "created_at": str(r[13])} for r in rows])
+    try:
+        email = request.args.get('email', '')
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT id, prediction, confidence, risk_level, created_at FROM motor_predictions WHERE user_email = %s ORDER BY created_at DESC", (email,))
+        rows = cur.fetchall()
+        conn.close()
+        return jsonify([{"id": r[0], "prediction": r[1], "confidence": r[2], "risk_level": r[3], "created_at": str(r[4])} for r in rows])
+    except Exception as e:
+        return jsonify([])
 
 @app.route("/pump-history")
 def pump_history():
-    cursor.execute("SELECT * FROM pump_predictions ORDER BY created_at DESC")
-    rows = cursor.fetchall()
-    return jsonify([{"id": r[0], "prediction": r[13], "confidence": r[15], "risk_level": r[16], "created_at": str(r[18])} for r in rows])
+    try:
+        email = request.args.get('email', '')
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT id, prediction, confidence, risk_level, created_at FROM pump_predictions WHERE user_email = %s ORDER BY created_at DESC", (email,))
+        rows = cur.fetchall()
+        conn.close()
+        return jsonify([{"id": r[0], "prediction": r[1], "confidence": r[2], "risk_level": r[3], "created_at": str(r[4])} for r in rows])
+    except Exception as e:
+        return jsonify([])
 
 @app.route("/compressor-history")
 def compressor_history():
-    cursor.execute("SELECT * FROM compressor_predictions ORDER BY created_at DESC")
-    rows = cursor.fetchall()
-    return jsonify([{"id": r[0], "prediction": r[15], "confidence": r[17], "risk_level": r[18], "created_at": str(r[20])} for r in rows])
+    try:
+        email = request.args.get('email', '')
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT id, prediction, confidence, risk_level, created_at FROM compressor_predictions WHERE user_email = %s ORDER BY created_at DESC", (email,))
+        rows = cur.fetchall()
+        conn.close()
+        return jsonify([{"id": r[0], "prediction": r[1], "confidence": r[2], "risk_level": r[3], "created_at": str(r[4])} for r in rows])
+    except Exception as e:
+        return jsonify([])
 
 @app.route("/turbine-history")
 def turbine_history():
-    cursor.execute("SELECT * FROM turbine_predictions ORDER BY created_at DESC")
-    rows = cursor.fetchall()
-    return jsonify([{"id": r[0], "prediction": r[6], "confidence": r[8], "risk_level": r[9], "created_at": str(r[11])} for r in rows])
-
-# ══════════════════════════════════════════════════════════════════════════════
-# RUN
-# ══════════════════════════════════════════════════════════════════════════════
+    try:
+        email = request.args.get('email', '')
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT id, prediction, confidence, risk_level, created_at FROM turbine_predictions WHERE user_email = %s ORDER BY created_at DESC", (email,))
+        rows = cur.fetchall()
+        conn.close()
+        return jsonify([{"id": r[0], "prediction": r[1], "confidence": r[2], "risk_level": r[3], "created_at": str(r[4])} for r in rows])
+    except Exception as e:
+        return jsonify([])
 
 if __name__ == "__main__":
     PORT = 5050

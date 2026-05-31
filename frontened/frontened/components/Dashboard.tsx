@@ -1,4 +1,3 @@
-
 'use client'
 
 import { useState, useEffect } from 'react'
@@ -46,7 +45,7 @@ function MiniChart({ color, base, variance }: { color: string; base: number; var
   )
 }
 
-const STATS = [
+const DUMMY_STATS = [
   { label: 'PUMPS',      val: 10, color: '#5b8af0', icon: '💧' },
   { label: 'MOTORS',     val: 10, color: '#F47920',  icon: '⚡' },
   { label: 'CRITICAL',   val: 5,  color: '#ef4444',  icon: '🚨' },
@@ -55,13 +54,17 @@ const STATS = [
   { label: 'AVG HEALTH', val: 71, color: '#a78bfa',  icon: '❤️', suffix: '%' },
 ]
 
-const ATTENTION = [
-  { name: 'Pump Unit C',  type: '💧 Pump',  block: 'Block 2', health: 31, status: 'BROKEN',    days: 6  },
-  { name: 'Motor Unit 6', type: '⚡ Motor', block: 'Block 4', health: 28, status: 'HIGH RISK',  days: 9  },
-  { name: 'Pump Unit H',  type: '💧 Pump',  block: 'Block 3', health: 22, status: 'BROKEN',    days: 4  },
-  { name: 'Motor Unit 2', type: '⚡ Motor', block: 'Block 2', health: 38, status: 'HIGH RISK',  days: 14 },
-  { name: 'Pump Unit B',  type: '💧 Pump',  block: 'Block 1', health: 45, status: 'RECOVERING', days: 22 },
+const DUMMY_ATTENTION = [
+  { name: 'Pump Unit C',  type: '💧 Pump',  block: 'Block 2', health: 31, status: 'BROKEN',    days: 6,  isReal: false },
+  { name: 'Motor Unit 6', type: '⚡ Motor', block: 'Block 4', health: 28, status: 'HIGH RISK',  days: 9,  isReal: false },
+  { name: 'Pump Unit H',  type: '💧 Pump',  block: 'Block 3', health: 22, status: 'BROKEN',    days: 4,  isReal: false },
+  { name: 'Motor Unit 2', type: '⚡ Motor', block: 'Block 2', health: 38, status: 'HIGH RISK',  days: 14, isReal: false },
+  { name: 'Pump Unit B',  type: '💧 Pump',  block: 'Block 1', health: 45, status: 'RECOVERING', days: 22, isReal: false },
 ]
+
+const MACHINE_ICON: Record<string, string> = {
+  MOTOR: '⚡ Motor', PUMP: '💧 Pump', COMPRESSOR: '🌀 Compressor', TURBINE: '⚙️ Turbine',
+}
 
 function HealthRing({ value, size = 52 }: { value: number; size?: number }) {
   const r = 18, cx = size / 2, cy = size / 2, circ = 2 * Math.PI * r
@@ -80,9 +83,13 @@ function HealthRing({ value, size = 52 }: { value: number; size?: number }) {
 function StatusBadge({ s }: { s: string }) {
   const map: Record<string, [string, string]> = {
     BROKEN:      ['rgba(239,68,68,0.12)',   '#ef4444'],
+    FAULT:       ['rgba(239,68,68,0.12)',   '#ef4444'],
+    FAULTY:      ['rgba(239,68,68,0.12)',   '#ef4444'],
     'HIGH RISK': ['rgba(244,121,32,0.12)',  '#F47920'],
     RECOVERING:  ['rgba(245,158,11,0.12)',  '#f59e0b'],
+    DEGRADED:    ['rgba(245,158,11,0.12)',  '#f59e0b'],
     HEALTHY:     ['rgba(14,165,160,0.12)',  '#0ea5a0'],
+    NORMAL:      ['rgba(14,165,160,0.12)',  '#0ea5a0'],
   }
   const [bg, cl] = map[s] || ['rgba(91,138,240,0.12)', '#5b8af0']
   return (
@@ -95,10 +102,65 @@ function StatusBadge({ s }: { s: string }) {
 
 export default function Dashboard({ setPage, user }: { setPage: (p: Page) => void; user: User }) {
   const [bars, setBars] = useState(() => Array.from({ length: 24 }, () => 50 + Math.random() * 40))
+  const [attention, setAttention] = useState(DUMMY_ATTENTION as any[])
+  const [realFaults, setRealFaults] = useState(0)
+  const [realNormal, setRealNormal] = useState(0)
+
   useEffect(() => {
-    const t = setInterval(() => setBars(prev => { const n = [...prev.slice(1)]; n.push(Math.max(20, Math.min(100, prev[prev.length - 1] + (Math.random() - 0.5) * 12))); return n }), 2000)
+    const t = setInterval(() => setBars(prev => {
+      const n = [...prev.slice(1)]
+      n.push(Math.max(20, Math.min(100, prev[prev.length - 1] + (Math.random() - 0.5) * 12)))
+      return n
+    }), 2000)
     return () => clearInterval(t)
   }, [])
+
+  useEffect(() => {
+    async function fetchReal() {
+      try {
+        const [motor, pump, compressor, turbine] = await Promise.all([
+          fetch('http://127.0.0.1:5050/motor-history').then(r => r.json()),
+          fetch('http://127.0.0.1:5050/pump-history').then(r => r.json()),
+          fetch('http://127.0.0.1:5050/compressor-history').then(r => r.json()),
+          fetch('http://127.0.0.1:5050/turbine-history').then(r => r.json()),
+        ])
+        const all = [
+          ...motor.map((r: any) => ({ ...r, machine: 'MOTOR' })),
+          ...pump.map((r: any) => ({ ...r, machine: 'PUMP' })),
+          ...compressor.map((r: any) => ({ ...r, machine: 'COMPRESSOR' })),
+          ...turbine.map((r: any) => ({ ...r, machine: 'TURBINE' })),
+        ]
+        const faultStatuses = ['FAULT', 'FAULTY', 'BROKEN', 'DEGRADED']
+        const realFaultRows = all
+          .filter(r => faultStatuses.includes(r.prediction))
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+          .slice(0, 5)
+          .map(r => ({
+            name: `${MACHINE_ICON[r.machine] || r.machine}`,
+            type: MACHINE_ICON[r.machine] || r.machine,
+            block: 'Live Data',
+            health: Math.round(100 - r.confidence),
+            status: r.prediction,
+            days: r.risk_level === 'High' ? 3 : 14,
+            isReal: true,
+          }))
+        setRealFaults(all.filter(r => faultStatuses.includes(r.prediction)).length)
+        setRealNormal(all.filter(r => ['NORMAL', 'HEALTHY'].includes(r.prediction)).length)
+        setAttention([...realFaultRows, ...DUMMY_ATTENTION])
+      } catch {
+        setAttention(DUMMY_ATTENTION)
+      }
+    }
+    fetchReal()
+  }, [])
+
+  const STATS = [
+    ...DUMMY_STATS.slice(0, 2),
+    { label: 'CRITICAL',   val: 5 + realFaults,  color: '#ef4444', icon: '🚨' },
+    { label: 'WARNINGS',   val: 7,                color: '#f59e0b', icon: '⚠️' },
+    { label: 'NORMAL',     val: 8 + realNormal,   color: '#0ea5a0', icon: '✅' },
+    { label: 'AVG HEALTH', val: 71,               color: '#a78bfa', icon: '❤️', suffix: '%' },
+  ]
 
   return (
     <div style={{ padding: 28, fontFamily: "'DM Sans', sans-serif" }}>
@@ -148,6 +210,16 @@ export default function Dashboard({ setPage, user }: { setPage: (p: Page) => voi
           <div style={{ fontFamily: "'Rajdhani', sans-serif", color: '#F47920', fontWeight: 700, fontSize: 11, letterSpacing: 2.5, marginBottom: 14 }}>⚡ MOTOR TEMP TREND</div>
           <MiniChart color="#F47920" base={308} variance={4} />
         </div>
+        <div className="d-card">
+          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'linear-gradient(90deg, #0ea5a0, rgba(14,165,160,0.2))', borderRadius: '16px 16px 0 0' }} />
+          <div style={{ fontFamily: "'Rajdhani', sans-serif", color: '#0ea5a0', fontWeight: 700, fontSize: 11, letterSpacing: 2.5, marginBottom: 14 }}>🌀 COMPRESSOR PRESSURE TREND</div>
+          <MiniChart color="#0ea5a0" base={6} variance={1} />
+        </div>
+        <div className="d-card">
+          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'linear-gradient(90deg, #a78bfa, rgba(167,139,250,0.2))', borderRadius: '16px 16px 0 0' }} />
+          <div style={{ fontFamily: "'Rajdhani', sans-serif", color: '#a78bfa', fontWeight: 700, fontSize: 11, letterSpacing: 2.5, marginBottom: 14 }}>⚙️ TURBINE RPM TREND</div>
+          <MiniChart color="#a78bfa" base={3000} variance={200} />
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16, marginBottom: 16 }}>
@@ -166,14 +238,18 @@ export default function Dashboard({ setPage, user }: { setPage: (p: Page) => voi
         <div className="d-card">
           <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'linear-gradient(90deg, #F47920, rgba(244,121,32,0.2))', borderRadius: '16px 16px 0 0' }} />
           <div style={{ fontFamily: "'Rajdhani', sans-serif", color: '#5b8af0', fontWeight: 700, fontSize: 11, letterSpacing: 2.5, marginBottom: 16 }}>FLEET STATUS</div>
-          {[['Critical', 5, '#ef4444'], ['Warning', 7, '#f59e0b'], ['Normal', 8, '#0ea5a0']].map(([s, n, c]) => (
+          {[
+            ['Critical', 5 + realFaults, '#ef4444'],
+            ['Warning',  7,              '#f59e0b'],
+            ['Normal',   8 + realNormal, '#0ea5a0'],
+          ].map(([s, n, c]) => (
             <div key={s as string} style={{ marginBottom: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: "'Rajdhani', sans-serif", fontSize: 11, marginBottom: 5, fontWeight: 700 }}>
                 <span style={{ color: c as string }}>{s}</span>
                 <span style={{ color: '#2a3450' }}>{n as number}/20</span>
               </div>
               <div style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 4, height: 5 }}>
-                <div style={{ width: `${((n as number) / 20) * 100}%`, height: 5, background: c as string, borderRadius: 4 }} />
+                <div style={{ width: `${Math.min(((n as number) / 20) * 100, 100)}%`, height: 5, background: c as string, borderRadius: 4 }} />
               </div>
             </div>
           ))}
@@ -194,9 +270,11 @@ export default function Dashboard({ setPage, user }: { setPage: (p: Page) => voi
             <tr>{['Machine', 'Type', 'Block', 'Health', 'Status', 'Forecast'].map(h => <th key={h} className="d-th">{h}</th>)}</tr>
           </thead>
           <tbody>
-            {ATTENTION.map((m, i) => (
-              <tr key={m.name} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)' }}>
-                <td className="d-td" style={{ color: '#f0f4ff', fontWeight: 600, fontFamily: "'Rajdhani', sans-serif" }}>{m.name}</td>
+            {attention.map((m, i) => (
+              <tr key={i} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)' }}>
+                <td className="d-td" style={{ color: m.isReal ? '#F47920' : '#f0f4ff', fontWeight: 600, fontFamily: "'Rajdhani', sans-serif" }}>
+                  {m.name} {m.isReal && <span style={{ fontSize: 9, color: '#F47920', fontWeight: 700 }}>●LIVE</span>}
+                </td>
                 <td className="d-td" style={{ color: '#2a3450', fontSize: 12, fontFamily: "'Rajdhani', sans-serif", fontWeight: 600 }}>{m.type}</td>
                 <td className="d-td" style={{ color: '#2a3450', fontSize: 12, fontFamily: "'Rajdhani', sans-serif", fontWeight: 600 }}>{m.block}</td>
                 <td className="d-td"><HealthRing value={m.health} /></td>
