@@ -386,10 +386,10 @@ def motor_history():
         email = request.args.get('email', '')
         conn = get_connection()
         cur = conn.cursor()
-        cur.execute("SELECT id, prediction, confidence, risk_level, created_at FROM motor_predictions WHERE user_email = %s ORDER BY created_at DESC", (email,))
+        cur.execute("SELECT id, prediction, confidence, risk_level, created_at, torque_nm, tool_wear_min, rpm FROM motor_predictions WHERE user_email = %s ORDER BY created_at DESC", (email,))
         rows = cur.fetchall()
         conn.close()
-        return jsonify([{"id": r[0], "prediction": r[1], "confidence": r[2], "risk_level": r[3], "created_at": str(r[4])} for r in rows])
+        return jsonify([{"id": r[0], "prediction": r[1], "confidence": r[2], "risk_level": r[3], "created_at": str(r[4]), "torque": r[5], "tool_wear": r[6], "rpm": r[7]} for r in rows])
     except Exception as e:
         return jsonify([])
 
@@ -399,10 +399,10 @@ def pump_history():
         email = request.args.get('email', '')
         conn = get_connection()
         cur = conn.cursor()
-        cur.execute("SELECT id, prediction, confidence, risk_level, created_at FROM pump_predictions WHERE user_email = %s ORDER BY created_at DESC", (email,))
+        cur.execute("SELECT id, prediction, confidence, risk_level, created_at, sensor_00, sensor_02, sensor_05, sensor_07 FROM pump_predictions WHERE user_email = %s ORDER BY created_at DESC", (email,))
         rows = cur.fetchall()
         conn.close()
-        return jsonify([{"id": r[0], "prediction": r[1], "confidence": r[2], "risk_level": r[3], "created_at": str(r[4])} for r in rows])
+        return jsonify([{"id": r[0], "prediction": r[1], "confidence": r[2], "risk_level": r[3], "created_at": str(r[4]), "sensor00": r[5], "sensor02": r[6], "sensor05": r[7], "sensor07": r[8]} for r in rows])
     except Exception as e:
         return jsonify([])
 
@@ -412,10 +412,10 @@ def compressor_history():
         email = request.args.get('email', '')
         conn = get_connection()
         cur = conn.cursor()
-        cur.execute("SELECT id, prediction, confidence, risk_level, created_at FROM compressor_predictions WHERE user_email = %s ORDER BY created_at DESC", (email,))
+        cur.execute("SELECT id, prediction, confidence, risk_level, created_at, rpm, motor_power, outlet_pressure_bar, air_flow, outlet_temp FROM compressor_predictions WHERE user_email = %s ORDER BY created_at DESC", (email,))
         rows = cur.fetchall()
         conn.close()
-        return jsonify([{"id": r[0], "prediction": r[1], "confidence": r[2], "risk_level": r[3], "created_at": str(r[4])} for r in rows])
+        return jsonify([{"id": r[0], "prediction": r[1], "confidence": r[2], "risk_level": r[3], "created_at": str(r[4]), "rpm": r[5], "power": r[6], "pressure": r[7], "airflow": r[8], "temp": r[9]} for r in rows])
     except Exception as e:
         return jsonify([])
 
@@ -425,10 +425,10 @@ def turbine_history():
         email = request.args.get('email', '')
         conn = get_connection()
         cur = conn.cursor()
-        cur.execute("SELECT id, prediction, confidence, risk_level, created_at FROM turbine_predictions WHERE user_email = %s ORDER BY created_at DESC", (email,))
+        cur.execute("SELECT id, prediction, confidence, risk_level, created_at, rpm, temperature, pressure, vibration, power_output FROM turbine_predictions WHERE user_email = %s ORDER BY created_at DESC", (email,))
         rows = cur.fetchall()
         conn.close()
-        return jsonify([{"id": r[0], "prediction": r[1], "confidence": r[2], "risk_level": r[3], "created_at": str(r[4])} for r in rows])
+        return jsonify([{"id": r[0], "prediction": r[1], "confidence": r[2], "risk_level": r[3], "created_at": str(r[4]), "rpm": r[5], "temp": r[6], "pressure": r[7], "vibration": r[8], "power": r[9]} for r in rows])
     except Exception as e:
         return jsonify([])
 
