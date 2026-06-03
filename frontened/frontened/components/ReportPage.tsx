@@ -65,13 +65,13 @@ const DUMMY_REPORT_DATA = {
     subtitle: 'PREDICTED FAILURES — NEXT 30 DAYS',
     color: '#ef4444',
     urgent: [
-      { name: 'Pump Unit H',   block: 'Block 3', type: '💧',  days: 4,  status: 'BROKEN',    isReal: false },
-      { name: 'Pump Unit C',   block: 'Block 2', type: '💧',  days: 6,  status: 'BROKEN',    isReal: false },
-      { name: 'Motor Unit 6',  block: 'Block 4', type: '⚡',  days: 9,  status: 'HIGH RISK',  isReal: false },
-      { name: 'Motor Unit 2',  block: 'Block 2', type: '⚡',  days: 14, status: 'HIGH RISK',  isReal: false },
-      { name: 'Compressor 3',  block: 'Block 5', type: '🌀',  days: 18, status: 'DEGRADED',   isReal: false },
-      { name: 'Turbine Unit 1',block: 'Block 1', type: '⚙️', days: 21, status: 'FAULT',      isReal: false },
-      { name: 'Pump Unit B',   block: 'Block 1', type: '💧',  days: 22, status: 'RECOVERING', isReal: false },
+      { name: 'Pump Unit H',    block: 'Block 3', type: '💧',  days: 4,  status: 'BROKEN',    isReal: false },
+      { name: 'Pump Unit C',    block: 'Block 2', type: '💧',  days: 6,  status: 'BROKEN',    isReal: false },
+      { name: 'Motor Unit 6',   block: 'Block 4', type: '⚡',  days: 9,  status: 'HIGH RISK',  isReal: false },
+      { name: 'Motor Unit 2',   block: 'Block 2', type: '⚡',  days: 14, status: 'HIGH RISK',  isReal: false },
+      { name: 'Compressor 3',   block: 'Block 5', type: '🌀',  days: 18, status: 'DEGRADED',   isReal: false },
+      { name: 'Turbine Unit 1', block: 'Block 1', type: '⚙️', days: 21, status: 'FAULT',      isReal: false },
+      { name: 'Pump Unit B',    block: 'Block 1', type: '💧',  days: 22, status: 'RECOVERING', isReal: false },
     ],
     baseStats: { pumps: 10, motors: 10, critical: 7, warnings: 5, normal: 6 },
     recommendations: [
@@ -101,6 +101,16 @@ export default function ReportPage() {
   const [activeReport, setActiveReport] = useState<ReportType | null>(null)
   const [loading, setLoading] = useState<ReportType | null>(null)
   const [realStats, setRealStats] = useState<RealStats | null>(null)
+  const [lastSync, setLastSync] = useState('')
+
+  useEffect(() => {
+    fetchReal()
+    const t = setInterval(() => {
+      fetchReal()
+      setLastSync(new Date().toLocaleTimeString())
+    }, 120000)
+    return () => clearInterval(t)
+  }, [])
 
   async function fetchReal() {
     try {
@@ -144,6 +154,89 @@ export default function ReportPage() {
     })
   }
 
+  async function generateShiftHandover() {
+    const email = (() => {
+      try { const s = sessionStorage.getItem('iocl_session'); if(s) return JSON.parse(s) } catch{} return null
+    })()
+
+    const now = new Date()
+    const shiftStart = new Date(now); shiftStart.setHours(now.getHours()-8)
+
+    let userTests = 0, userFaults = 0, userHealthy = 0
+    let refineryFaults = 0, refineryWarnings = 0
+    const faultMachines: string[] = []
+
+    try {
+      const [motor, pump, comp, turb] = await Promise.all([
+        fetch(`http://127.0.0.1:5050/motor-history?email=${encodeURIComponent(email?.email||'')}`).then(r=>r.json()),
+        fetch(`http://127.0.0.1:5050/pump-history?email=${encodeURIComponent(email?.email||'')}`).then(r=>r.json()),
+        fetch(`http://127.0.0.1:5050/compressor-history?email=${encodeURIComponent(email?.email||'')}`).then(r=>r.json()),
+        fetch(`http://127.0.0.1:5050/turbine-history?email=${encodeURIComponent(email?.email||'')}`).then(r=>r.json()),
+      ])
+      const all = [...motor, ...pump, ...comp, ...turb]
+      userTests = all.length
+      userFaults = all.filter((r:any) => ['FAULT','FAULTY','BROKEN'].includes(r.prediction)).length
+      userHealthy = all.filter((r:any) => ['NORMAL','HEALTHY'].includes(r.prediction)).length
+      all.filter((r:any) => ['FAULT','FAULTY','BROKEN'].includes(r.prediction))
+         .slice(0,3).forEach((r:any) => faultMachines.push(r.machine||'UNKNOWN'))
+
+      const auto = await fetch('http://127.0.0.1:5050/alerts/auto').then(r=>r.json())
+      refineryFaults = auto.filter((r:any) => r.risk_level==='High').length
+      refineryWarnings = auto.filter((r:any) => r.risk_level==='Medium').length
+    } catch {}
+
+    const content = `IOCL GUWAHATI REFINERY
+SHIFT HANDOVER REPORT
+${'='.repeat(40)}
+
+Engineer:    ${email?.name || 'N/A'}
+Department:  ${email?.dept || 'N/A'}
+Shift Date:  ${now.toLocaleDateString()}
+Shift Time:  ${shiftStart.toLocaleTimeString()} — ${now.toLocaleTimeString()}
+Generated:   ${now.toLocaleString()}
+
+${'='.repeat(40)}
+MANUAL TEST LOGS THIS SHIFT
+${'='.repeat(40)}
+Total predictions run:  ${userTests}
+  Healthy / Normal:     ${userHealthy}
+  Fault / Broken:       ${userFaults}
+  Warnings:             ${userTests - userHealthy - userFaults}
+
+${'='.repeat(40)}
+REFINERY AUTO ALERTS THIS SHIFT
+${'='.repeat(40)}
+Critical alerts:  ${refineryFaults}
+Warning alerts:   ${refineryWarnings}
+
+${'='.repeat(40)}
+MACHINES NEEDING ATTENTION
+${'='.repeat(40)}
+${faultMachines.length > 0
+  ? faultMachines.map(m => `  → ${m} — FAULT DETECTED — inspect immediately`).join('\n')
+  : '  No manual faults detected this shift'}
+
+${'='.repeat(40)}
+RECOMMENDATION
+${'='.repeat(40)}
+${userFaults > 0
+  ? `${userFaults} machine(s) require attention before next shift handover.\nEnsure maintenance team is notified.`
+  : 'All manually tested machines operating normally.\nContinue standard monitoring procedures.'}
+
+${'='.repeat(40)}
+IOCL Predictive Maintenance System
+Guwahati Refinery · Auto-generated
+`
+
+    const blob = new Blob([content], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `shift_handover_${now.toISOString().slice(0,10)}.txt`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   const dummyReport = activeReport ? DUMMY_REPORT_DATA[activeReport] : null
 
   return (
@@ -158,6 +251,7 @@ export default function ReportPage() {
         .gen-btn:disabled { opacity: 0.5; cursor: not-allowed; }
       `}</style>
 
+      {/* Header */}
       <div style={{ marginBottom: 28 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
           <span style={{ fontFamily: "'Rajdhani', sans-serif", fontSize: 11, fontWeight: 700, letterSpacing: 3, padding: '3px 10px', borderRadius: 6, background: 'rgba(167,139,250,0.12)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.25)' }}>REPORTS</span>
@@ -166,11 +260,26 @@ export default function ReportPage() {
         <div style={{ fontFamily: "'Rajdhani', sans-serif", color: '#2a3450', fontSize: 11, marginTop: 4, fontWeight: 600, letterSpacing: 2 }}>MAINTENANCE REPORTS · FORECASTS · RECOMMENDATIONS</div>
       </div>
 
+      {/* Shift Handover Button */}
+      <button
+        onClick={generateShiftHandover}
+        style={{ display:'flex', alignItems:'center', gap:10, padding:'12px 24px',
+          borderRadius:12, border:'1px solid rgba(14,165,160,0.3)',
+          background:'rgba(14,165,160,0.08)', color:'#0ea5a0', cursor:'pointer',
+          fontFamily:"'Rajdhani',sans-serif", fontWeight:700, fontSize:13,
+          letterSpacing:1.5, marginBottom:24, transition:'all 0.2s' }}
+        onMouseOver={e=>(e.currentTarget.style.background='rgba(14,165,160,0.15)')}
+        onMouseOut={e=>(e.currentTarget.style.background='rgba(14,165,160,0.08)')}>
+        📋 GENERATE SHIFT HANDOVER REPORT
+        <span style={{ fontSize:10, color:'#2a3450', fontWeight:600 }}>→ Downloads as .txt</span>
+      </button>
+
+      {/* Report Type Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 28 }}>
         {([
-          { key: 'daily',   title: 'Daily Report',   desc: "Today's machine health summary",  icon: '📅', color: '#5b8af0' },
-          { key: 'weekly',  title: 'Weekly Report',  desc: '7-day trend and alert analysis',  icon: '📆', color: '#F47920' },
-          { key: 'failure', title: 'Failure Report', desc: 'Upcoming failures by forecast',   icon: '🚨', color: '#ef4444' },
+          { key: 'daily',   title: 'Daily Report',   desc: "Today's machine health summary", icon: '📅', color: '#5b8af0' },
+          { key: 'weekly',  title: 'Weekly Report',  desc: '7-day trend and alert analysis', icon: '📆', color: '#F47920' },
+          { key: 'failure', title: 'Failure Report', desc: 'Upcoming failures by forecast',  icon: '🚨', color: '#ef4444' },
         ] as const).map(r => (
           <div key={r.key} className="rep-type-card">
             <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg, ${r.color}, ${r.color}33)` }} />
@@ -200,7 +309,7 @@ export default function ReportPage() {
             <div style={{ fontFamily: "'Rajdhani', sans-serif", color: dummyReport.color, fontSize: 10, marginTop: 4, letterSpacing: 2, fontWeight: 700 }}>{dummyReport.subtitle}</div>
           </div>
 
-          {/* REAL STATS on top if available */}
+          {/* Real Stats */}
           {realStats && realStats.faults + realStats.normal + realStats.degraded > 0 && (
             <div style={{ marginBottom: 20 }}>
               <div style={{ fontFamily: "'Rajdhani', sans-serif", color: '#F47920', fontWeight: 700, fontSize: 11, letterSpacing: 2.5, marginBottom: 12 }}>
@@ -208,14 +317,14 @@ export default function ReportPage() {
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 16 }}>
                 {[
-                  ['MOTOR', realStats.motor, '#F47920'],
-                  ['PUMP', realStats.pump, '#5b8af0'],
-                  ['COMPRESSOR', realStats.compressor, '#0ea5a0'],
-                  ['TURBINE', realStats.turbine, '#a78bfa'],
-                  ['FAULTS', realStats.faults, '#ef4444'],
-                  ['DEGRADED', realStats.degraded, '#f59e0b'],
-                  ['NORMAL', realStats.normal, '#0ea5a0'],
-                  ['TOTAL', realStats.motor + realStats.pump + realStats.compressor + realStats.turbine, '#e2e8f0'],
+                  ['MOTOR',      realStats.motor,                                                                    '#F47920'],
+                  ['PUMP',       realStats.pump,                                                                     '#5b8af0'],
+                  ['COMPRESSOR', realStats.compressor,                                                               '#0ea5a0'],
+                  ['TURBINE',    realStats.turbine,                                                                  '#a78bfa'],
+                  ['FAULTS',     realStats.faults,                                                                   '#ef4444'],
+                  ['DEGRADED',   realStats.degraded,                                                                 '#f59e0b'],
+                  ['NORMAL',     realStats.normal,                                                                   '#0ea5a0'],
+                  ['TOTAL',      realStats.motor + realStats.pump + realStats.compressor + realStats.turbine,        '#e2e8f0'],
                 ].map(([l, v, c]) => (
                   <div key={l as string} style={{ background: 'rgba(255,255,255,0.025)', borderRadius: 12, padding: '14px 10px', textAlign: 'center', border: '1px solid rgba(244,121,32,0.15)', position: 'relative', overflow: 'hidden' }}>
                     <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: c as string }} />
@@ -245,7 +354,7 @@ export default function ReportPage() {
             </div>
           )}
 
-          {/* DUMMY STATS */}
+          {/* Dummy Stats */}
           <div style={{ display: 'grid', gridTemplateColumns: `repeat(5, 1fr)`, gap: 10, marginBottom: 24 }}>
             {[
               ['PUMPS',    dummyReport.baseStats.pumps,    '#5b8af0'],
@@ -262,6 +371,7 @@ export default function ReportPage() {
             ))}
           </div>
 
+          {/* Urgent Machines */}
           <div style={{ marginBottom: 20 }}>
             <div style={{ fontFamily: "'Rajdhani', sans-serif", color: dummyReport.color, fontWeight: 700, fontSize: 11, letterSpacing: 2.5, marginBottom: 14 }}>🚨 {dummyReport.subtitle}</div>
             {dummyReport.urgent.map(m => (
@@ -278,6 +388,7 @@ export default function ReportPage() {
             ))}
           </div>
 
+          {/* Recommendations */}
           <div style={{ background: 'rgba(14,165,160,0.05)', border: '1px solid rgba(14,165,160,0.15)', borderRadius: 12, padding: 20 }}>
             <div style={{ fontFamily: "'Rajdhani', sans-serif", color: '#0ea5a0', fontWeight: 700, fontSize: 11, letterSpacing: 2.5, marginBottom: 14 }}>RECOMMENDATIONS</div>
             {dummyReport.recommendations.map(r => (
